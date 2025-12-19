@@ -1,0 +1,36 @@
+﻿name: Deploy to EC2
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    - name: Deploy to EC2
+      env:
+        EC2_HOST: ${{ secrets.EC2_HOST }}
+        EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+        EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        echo "$EC2_SSH_KEY" > private_key.pem
+        chmod 600 private_key.pem
+        ssh -o StrictHostKeyChecking=no -i private_key.pem ${EC2_USERNAME}@${EC2_HOST} << 'EOF'
+          docker stop ai-study-planner || true
+          docker rm ai-study-planner || true
+          docker rmi ai-study-planner || true
+          rm -rf ~/app
+          mkdir -p ~/app
+        EOF
+        scp -o StrictHostKeyChecking=no -i private_key.pem -r ./* ${EC2_USERNAME}@${EC2_HOST}:~/app/
+        ssh -o StrictHostKeyChecking=no -i private_key.pem ${EC2_USERNAME}@${EC2_HOST} << EOF
+          cd ~/app
+          echo "GEMINI_API_KEY=${GEMINI_API_KEY}" > backend/.env
+          docker build -t ai-study-planner .
+          docker run -d --name ai-study-planner -p 80:5000 --restart unless-stopped --env-file backend/.env ai-study-planner
+          docker ps
+        EOF
+        rm -f private_key.pem
